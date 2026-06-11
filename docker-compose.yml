@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maynd-admin
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=3000
+      - API_BASE=http://localhost:3000/api
+      - DATABASE_URL=sqlite:./data/maynd-admin.db
+      - JWT_SECRET=${JWT_SECRET:-change-this-in-production-to-a-strong-secret}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@maynd.ma}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - maynd-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  maynd-network:
+    driver: bridge
+
+volumes:
+  maynd-data:
+  maynd-logs:
