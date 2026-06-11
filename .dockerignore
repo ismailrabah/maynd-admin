@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.client/.output
+client/.output
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test
+coverage/
+*.test.ts
+*.spec.ts
+
+# Documentation
+docs/
+*.md
+
+# Temporary files
+tmp/
+temp/
+*.tmp
