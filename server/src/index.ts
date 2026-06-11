@@ -1,11 +1,7 @@
-// Maynd.ma Admin API - Main Entry Point
-import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
-import { prettyJSON } from 'hono/pretty-json';
-import { db, initializeDatabase } from './db/sqlite';
-import { authMiddleware } from './middleware/auth';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { authRateLimiter, apiRateLimiter } from './middleware/rateLimiter';
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
 import licensesRoutes from './routes/licenses';
@@ -13,44 +9,79 @@ import devicesRoutes from './routes/devices';
 import modelsRoutes from './routes/models';
 import statsRoutes from './routes/stats';
 
-initializeDatabase();
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-const app = new Hono();
-app.use('*', logger());
-app.use('*', cors());
-app.use('*', prettyJSON());
+// Security middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-app.get('/', (c) => c.json({ success: true, message: 'Maynd.ma Admin API', version: '1.0.0', timestamp: new Date().toISOString() }));
-
-app.get('/health', (c) => {
-  try {
-    db.prepare('SELECT 1').get();
-    return c.json({ success: true, status: 'healthy', timestamp: new Date().toISOString() });
-  } catch {
-    return c.json({ success: false, status: 'unhealthy', error: 'Database connection failed' }, 500);
-  }
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(req.method + ' ' + req.originalUrl + ' ' + res.statusCode + ' - ' + duration + 'ms');
+  });
+  next();
 });
 
-// Public routes
-app.route('/api/auth', authRoutes);
-app.route('/api/licenses', licensesRoutes);
-app.route('/api/devices', devicesRoutes);
+// Apply rate limiting
+app.use('/api/auth', authRateLimiter, authRoutes);
+app.use('/api/', apiRateLimiter);
 
-// Protected routes
-const protectedApp = new Hono();
-protectedApp.use('*', authMiddleware);
-protectedApp.route('/users', usersRoutes);
-protectedApp.route('/licenses', licensesRoutes);
-protectedApp.route('/devices', devicesRoutes);
-protectedApp.route('/models', modelsRoutes);
-protectedApp.route('/stats', statsRoutes);
-app.route('/api', protectedApp);
+// Routes
+app.use('/api/users', usersRoutes);
+app.use('/api/licenses', licensesRoutes);
+app.use('/api/devices', devicesRoutes);
+app.use('/api/models', modelsRoutes);
+app.use('/api/stats', statsRoutes);
 
-app.onError((err, c) => c.json({ success: false, error: 'Internal server error', message: process.env.NODE_ENV === 'development' ? err.message : undefined }, 500));
-app.notFound((c) => c.json({ success: false, error: 'Not found', path: c.req.path }, 404));
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    success: true, 
+    status: 'healthy',
+    timestamp: new Date().toISOString()
+  });
+});
 
-const port = parseInt(process.env.PORT || '4000');
-console.log(`\nMaynd.ma Admin API\nhttps://github.com/ismailrabah/maynd-admin\n`);
-console.log(`Starting server on http://localhost:${port}`);
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    success: true,
+    message: 'Maynd.ma Admin API',
+    version: '1.0.0'
+  });
+});
 
-serve({ fetch: app.fetch, port }, () => console.log(`Server is running on http://localhost:${port}`));
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false, 
+    error: 'Not Found'
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ 
+    success: false, 
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log('Maynd.ma Admin server running on port ' + PORT);
+  console.log('Environment: ' + (process.env.NODE_ENV || 'development'));
+});
+
+export default app;
