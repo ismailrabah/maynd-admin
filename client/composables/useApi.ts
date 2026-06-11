@@ -1,221 +1,203 @@
 import type { Ref } from 'vue';
-import type {
-  License,
-  LicenseCreationInput,
-  Device,
-  DeviceRegistrationInput,
-  AdminUser,
-  UserCreationInput,
-  AIModel,
-  ModelCreationInput,
-  ApiResponse,
-  PaginatedResponse,
-  DashboardStats
-} from '~/types';
+import type { 
+  License, 
+  Device, 
+  AdminUser as User, 
+  AIModel as Model, 
+  DashboardStats as Stats,
+  ApiResponse, 
+  PaginatedResponse 
+} from '@/types';
 
-const config = useRuntimeConfig();
-const apiBase = config.public.apiBase || '/api';
-
-interface FetchOptions {
-  page?: number;
-  limit?: number;
-  search?: string;
-  status?: string;
-  type?: string;
-  [key: string]: string | number | undefined;
+export interface ApiOptions {
+  params?: Record<string, string | number | boolean>;
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
-export function useApi() {
-  const getToken = () => localStorage.getItem('maynd-admin-token');
+export interface UseApiReturn {
+  get: <T>(url: string, options?: ApiOptions) => Promise<ApiResponse<T>>;
+  post: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => Promise<ApiResponse<T>>;
+  put: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => Promise<ApiResponse<T>>;
+  patch: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => Promise<ApiResponse<T>>;
+  delete: <T>(url: string, options?: ApiOptions) => Promise<ApiResponse<T>>;
+  isLoading: Ref<boolean>;
+  error: Ref<string | null>;
+  clearError: () => void;
+}
 
-  const headers = () => ({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${getToken()}`
-  });
+export function useApi(): UseApiReturn {
+  const config = useRuntimeConfig();
+  const isLoading = ref(false);
+  const error = ref<string | null>(null);
 
-  const fetchWrapper = async <T>(url: string, options?: RequestInit): Promise<ApiResponse<T>> => {
+  const getToken = (): string | null => {
+    if (process.client) {
+      return localStorage.getItem('maynd-admin-token');
+    }
+    return null;
+  };
+
+  const clearError = () => {
+    error.value = null;
+  };
+
+  const request = async <T>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    url: string,
+    options: ApiOptions = {}
+  ): Promise<ApiResponse<T>> => {
     try {
-      const response = await $fetch<ApiResponse<T>>(url, {
-        ...options,
-        headers: { ...headers(), ...options?.headers }
-      });
-      return response;
-    } catch (error) {
-      console.error('API Error:', error);
-      return { success: false, error: 'Network error' };
+      isLoading.value = true;
+      clearError();
+
+      const baseUrl = config.public.apiBase || 'http://localhost:3001/api';
+      const fullUrl = `${baseUrl}${url}`;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      };
+
+      const token = getToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const fetchOptions: RequestInit = {
+        method,
+        headers,
+      };
+
+      if (method !== 'GET' && options.body) {
+        fetchOptions.body = JSON.stringify(options.body);
+      }
+
+      if (options.params) {
+        const searchParams = new URLSearchParams();
+        Object.entries(options.params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            searchParams.append(key, String(value));
+          }
+        });
+        fullUrl += '?' + searchParams.toString();
+      }
+
+      const response = await $fetch<T>(fullUrl, fetchOptions);
+      
+      return {
+        success: true,
+        data: response,
+        message: 'Success',
+      };
+    } catch (err: any) {
+      const message = err.data?.message || err.message || 'An error occurred';
+      error.value = message;
+      
+      return {
+        success: false,
+        data: null,
+        message,
+      };
+    } finally {
+      isLoading.value = false;
     }
   };
 
-  // Dashboard Stats
-  const getStats = async (): Promise<ApiResponse<DashboardStats>> => {
-    return fetchWrapper<DashboardStats>(`${apiBase}/stats`);
+  return {
+    get: <T>(url: string, options?: ApiOptions) => request<T>('GET', url, options),
+    post: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => 
+      request<T>('POST', url, { ...options, body }),
+    put: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => 
+      request<T>('PUT', url, { ...options, body }),
+    patch: <T>(url: string, body?: Record<string, unknown>, options?: ApiOptions) => 
+      request<T>('PATCH', url, { ...options, body }),
+    delete: <T>(url: string, options?: ApiOptions) => request<T>('DELETE', url, options),
+    isLoading,
+    error,
+    clearError,
   };
+}
 
-  // Licenses API
-  const getLicenses = async (options: FetchOptions = {}): Promise<ApiResponse<PaginatedResponse<License>>> => {
-    const params = new URLSearchParams();
-    Object.entries(options).forEach(([key, value]) => {
-      if (value !== undefined) params.append(key, String(value));
-    });
-    return fetchWrapper<PaginatedResponse<License>>(`${apiBase}/licenses?${params.toString()}`);
-  };
-
-  const getLicenseById = async (id: string): Promise<ApiResponse<License & { devices?: Device[] }>> => {
-    return fetchWrapper<License & { devices?: Device[] }>(`${apiBase}/licenses/${id}`);
-  };
-
-  const createLicense = async (data: LicenseCreationInput): Promise<ApiResponse<License>> => {
-    return fetchWrapper<License>(`${apiBase}/licenses`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const updateLicense = async (id: string, data: Partial<LicenseCreationInput>): Promise<ApiResponse<License>> => {
-    return fetchWrapper<License>(`${apiBase}/licenses/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const deleteLicense = async (id: string): Promise<ApiResponse<License>> => {
-    return fetchWrapper<License>(`${apiBase}/licenses/${id}`, {
-      method: 'DELETE'
-    });
-  };
-
-  const validateLicense = async (key: string, hardwareFingerprint?: string): Promise<ApiResponse<{ valid: boolean; license?: License; error?: string; reason?: string }>> => {
-    return fetchWrapper<{ valid: boolean; license?: License; error?: string; reason?: string }>(`${apiBase}/licenses/validate`, {
-      method: 'POST',
-      body: JSON.stringify({ license_key: key, hardware_fingerprint: hardwareFingerprint })
-    });
-  };
-
-  // Devices API
-  const getDevices = async (options: FetchOptions = {}): Promise<ApiResponse<PaginatedResponse<Device>>> => {
-    const params = new URLSearchParams();
-    Object.entries(options).forEach(([key, value]) => {
-      if (value !== undefined) params.append(key, String(value));
-    });
-    return fetchWrapper<PaginatedResponse<Device>>(`${apiBase}/devices?${params.toString()}`);
-  };
-
-  const getDeviceById = async (id: string): Promise<ApiResponse<Device>> => {
-    return fetchWrapper<Device>(`${apiBase}/devices/${id}`);
-  };
-
-  const registerDevice = async (data: DeviceRegistrationInput): Promise<ApiResponse<Device>> => {
-    return fetchWrapper<Device>(`${apiBase}/devices/register`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const updateDevice = async (id: string, data: Partial<Device>): Promise<ApiResponse<Device>> => {
-    return fetchWrapper<Device>(`${apiBase}/devices/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const deleteDevice = async (id: string): Promise<ApiResponse<Device>> => {
-    return fetchWrapper<Device>(`${apiBase}/devices/${id}`, {
-      method: 'DELETE'
-    });
-  };
-
-  // Users API
-  const getUsers = async (options: FetchOptions = {}): Promise<ApiResponse<PaginatedResponse<AdminUser>>> => {
-    const params = new URLSearchParams();
-    Object.entries(options).forEach(([key, value]) => {
-      if (value !== undefined) params.append(key, String(value));
-    });
-    return fetchWrapper<PaginatedResponse<AdminUser>>(`${apiBase}/users?${params.toString()}`);
-  };
-
-  const getUserById = async (id: string): Promise<ApiResponse<AdminUser>> => {
-    return fetchWrapper<AdminUser>(`${apiBase}/users/${id}`);
-  };
-
-  const createUser = async (data: UserCreationInput): Promise<ApiResponse<AdminUser>> => {
-    return fetchWrapper<AdminUser>(`${apiBase}/users`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const updateUser = async (id: string, data: Partial<UserCreationInput & { status?: string }>): Promise<ApiResponse<AdminUser>> => {
-    return fetchWrapper<AdminUser>(`${apiBase}/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const deleteUser = async (id: string): Promise<ApiResponse<AdminUser>> => {
-    return fetchWrapper<AdminUser>(`${apiBase}/users/${id}`, {
-      method: 'DELETE'
-    });
-  };
-
-  // Models API
-  const getModels = async (options: FetchOptions = {}): Promise<ApiResponse<PaginatedResponse<AIModel>>> => {
-    const params = new URLSearchParams();
-    Object.entries(options).forEach(([key, value]) => {
-      if (value !== undefined) params.append(key, String(value));
-    });
-    return fetchWrapper<PaginatedResponse<AIModel>>(`${apiBase}/models?${params.toString()}`);
-  };
-
-  const getModelById = async (id: string): Promise<ApiResponse<AIModel>> => {
-    return fetchWrapper<AIModel>(`${apiBase}/models/${id}`);
-  };
-
-  const createModel = async (data: ModelCreationInput): Promise<ApiResponse<AIModel>> => {
-    return fetchWrapper<AIModel>(`${apiBase}/models`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const updateModel = async (id: string, data: Partial<ModelCreationInput & { status?: string }>): Promise<ApiResponse<AIModel>> => {
-    return fetchWrapper<AIModel>(`${apiBase}/models/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  };
-
-  const deleteModel = async (id: string): Promise<ApiResponse<AIModel>> => {
-    return fetchWrapper<AIModel>(`${apiBase}/models/${id}`, {
-      method: 'DELETE'
-    });
-  };
+// Specific API hooks for admin
+export function useLicensesApi() {
+  const { get, post, put, delete: del, ...rest } = useApi();
 
   return {
-    getStats,
-    // Licenses
-    getLicenses,
-    getLicenseById,
-    createLicense,
-    updateLicense,
-    deleteLicense,
-    validateLicense,
-    // Devices
-    getDevices,
-    getDeviceById,
-    registerDevice,
-    updateDevice,
-    deleteDevice,
-    // Users
-    getUsers,
-    getUserById,
-    createUser,
-    updateUser,
-    deleteUser,
-    // Models
-    getModels,
-    getModelById,
-    createModel,
-    updateModel,
-    deleteModel
+    getLicenses: (params?: { page?: number; limit?: number; status?: string; search?: string }) => 
+      get<PaginatedResponse<License>>('/licenses', { params }),
+    getLicenseById: (id: string) => get<License>(`/licenses/${id}`),
+    createLicense: (data: Partial<License>) => post<License>('/licenses', data),
+    updateLicense: (id: string, data: Partial<License>) => put<License>(`/licenses/${id}`, data),
+    deleteLicense: (id: string) => del<License>(`/licenses/${id}`),
+    ...rest,
+  };
+}
+
+export function useDevicesApi() {
+  const { get, post, put, delete: del, ...rest } = useApi();
+
+  return {
+    getDevices: (params?: { page?: number; limit?: number; status?: string; search?: string }) => 
+      get<PaginatedResponse<Device>>('/devices', { params }),
+    getDeviceById: (id: string) => get<Device>(`/devices/${id}`),
+    createDevice: (data: Partial<Device>) => post<Device>('/devices', data),
+    updateDevice: (id: string, data: Partial<Device>) => put<Device>(`/devices/${id}`, data),
+    deleteDevice: (id: string) => del<Device>(`/devices/${id}`),
+    ...rest,
+  };
+}
+
+export function useUsersApi() {
+  const { get, post, put, delete: del, ...rest } = useApi();
+
+  return {
+    getUsers: (params?: { page?: number; limit?: number; role?: string; search?: string }) => 
+      get<PaginatedResponse<User>>('/users', { params }),
+    getUserById: (id: string) => get<User>(`/users/${id}`),
+    createUser: (data: Partial<User>) => post<User>('/users', data),
+    updateUser: (id: string, data: Partial<User>) => put<User>(`/users/${id}`, data),
+    deleteUser: (id: string) => del<User>(`/users/${id}`),
+    ...rest,
+  };
+}
+
+export function useModelsApi() {
+  const { get, post, put, delete: del, ...rest } = useApi();
+
+  return {
+    getModels: (params?: { page?: number; limit?: number; search?: string }) => 
+      get<PaginatedResponse<Model>>('/models', { params }),
+    getModelById: (id: string) => get<Model>(`/models/${id}`),
+    createModel: (data: Partial<Model>) => post<Model>('/models', data),
+    updateModel: (id: string, data: Partial<Model>) => put<Model>(`/models/${id}`, data),
+    deleteModel: (id: string) => del<Model>(`/models/${id}`),
+    ...rest,
+  };
+}
+
+export function useStatsApi() {
+  const { get, ...rest } = useApi();
+
+  return {
+    getStats: () => get<Stats>('/stats'),
+    ...rest,
+  };
+}
+
+export function useAuthApi() {
+  const { post, ...rest } = useApi();
+
+  return {
+    login: (credentials: { username: string; password: string }) => 
+      post<{ token: string; user: User }>('/auth/login', credentials),
+    logout: () => {
+      if (process.client) {
+        localStorage.removeItem('maynd-admin-token');
+        localStorage.removeItem('maynd-admin-user');
+      }
+      return Promise.resolve({ success: true, data: null, message: 'Logged out' });
+    },
+    ...rest,
   };
 }
