@@ -21,6 +21,7 @@ const login = async () => {
 const handleKeydown = (e: KeyboardEvent) => { if (e.key === 'Enter' && !isLoading.value) login(); };
 onMounted(() => { const token = localStorage.getItem('maynd-admin-token'); if (token) router.push('/'); });
 </script>
+
 <template>
   <div class="animate-fade-in">
     <div class="text-center mb-8"><h1 class="text-3xl font-bold text-[var(--text-primary)] mb-2">Welcome back</h1><p class="text-[var(--text-secondary)]">Sign in to manage Maynd.ma</p></div>
@@ -31,6 +32,5 @@ onMounted(() => { const token = localStorage.getItem('maynd-admin-token'); if (t
       <div class="flex items-center justify-between"><label class="flex items-center gap-2 cursor-pointer"><input v-model="form.remember" type="checkbox" class="w-4 h-4 accent-[#10b981]" /><span class="text-sm text-[var(--text-secondary)]">Remember me</span></label></div>
       <button type="submit" class="btn btn-primary w-full" :disabled="isLoading || !form.username || !form.password"><span v-if="isLoading" class="spinner w-4 h-4" /><span v-else>Sign in</span></button>
     </form>
-    <div class="mt-6 text-center"><p class="text-sm text-[var(--text-muted)]">Default: admin / admin123</p></div>
   </div>
 </template>
