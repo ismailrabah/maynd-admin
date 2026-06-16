@@ -1,26 +1,30 @@
 # Dockerfile for Maynd.ma Admin
-# Multi-stage build for production
+# Multi-stage build for production with Bun
 
 # Stage 1: Build the application
-FROM node:20-alpine AS builder
+FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
 # Copy package files
 COPY client/package.json client/nuxt.config.ts client/tsconfig.json ./
+COPY server/package.json ./server/
 
-# Install dependencies
-RUN npm ci
+# Install dependencies with Bun
+RUN bun install
 
 # Copy source files
 COPY client/ ./client/
 COPY server/ ./server/
 
-# Build the client
-RUN cd client && npm run build
+# Set environment for build (required for vite-plugin-checker)
+ENV NODE_ENV=development
+
+# Build the client with Bun
+RUN cd client && bun run build
 
 # Stage 2: Production image
-FROM node:20-alpine AS production
+FROM oven/bun:1 AS production
 
 WORKDIR /app
 
@@ -28,9 +32,10 @@ WORKDIR /app
 COPY --from=builder /app/client/.output ./output
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/client/package.json ./package.json
+COPY --from=builder /app/server/package.json ./server/
 
 # Install only production dependencies
-RUN npm ci --only=production
+RUN bun install --production
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
@@ -52,4 +57,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 # Start the application
-CMD ["node", "server/src/index.ts"]
+CMD ["bun", "run", "server/src/index.ts"]
